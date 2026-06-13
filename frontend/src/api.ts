@@ -133,6 +133,7 @@ const mapReview = (review: ApiReview): Review => ({
     year: "numeric",
   }).format(new Date(`${review.period}-01T00:00:00`)),
   dueDate: displayDate(review.due_date),
+  dueDateValue: review.due_date,
   status: review.status,
   recommendation: review.recommendation,
   commentary: review.commentary,

@@ -17,9 +17,10 @@ specification work, and extension.
 - React 19
 - TypeScript
 - Vite
+- Tailwind CSS 4
 - React Router
 - Lucide React icons
-- Custom CSS
+- Tailwind-backed custom design system and responsive animations
 
 Frontend source lives in `frontend/src`.
 
@@ -151,6 +152,8 @@ Current routes include:
 - Approval queue
 - Monthly reviews view
 - Admin view for seeded personas
+- Responsive desktop and mobile layouts
+- Reduced-motion accessibility support
 
 ### Backend API capabilities
 

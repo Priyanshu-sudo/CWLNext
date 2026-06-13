@@ -46,6 +46,7 @@ export interface Review {
   borrower: string;
   period: string;
   dueDate: string;
+  dueDateValue: string;
   status: "DUE" | "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "RETURNED";
   owner: string;
   recommendation: string;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   Bell,
@@ -24,6 +24,7 @@ import {
   Navigate,
   Route,
   Routes,
+  useLocation,
   useNavigate,
   useParams,
 } from "react-router-dom";
@@ -48,6 +49,68 @@ function StatusPill({ status }: { status: string }) {
     </span>
   );
 }
+
+function getApprovalItems(caseItems: WatchCase[], persona: Persona) {
+  const pendingItems = caseItems.filter(
+    (item) => item.status === "PENDING_APPROVAL" || item.status === "REMOVAL_PENDING",
+  );
+
+  if (persona.role === "ADMIN") {
+    return pendingItems;
+  }
+
+  if (persona.role === "APPROVER") {
+    return pendingItems.filter((item) => item.division === persona.division);
+  }
+
+  return [];
+}
+
+function parseDateOnly(value: string) {
+  return new Date(`${value}T00:00:00`);
+}
+
+function differenceInDays(from: Date, to: Date) {
+  return Math.floor((to.getTime() - from.getTime()) / 86_400_000);
+}
+
+function formatDashboardDate(value: Date) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(value).toUpperCase();
+}
+
+function isActionableReview(review: Review) {
+  return ["DUE", "DRAFT", "RETURNED"].includes(review.status);
+}
+
+function isDueSoonReview(review: Review, today: Date) {
+  if (!isActionableReview(review)) {
+    return false;
+  }
+
+  const daysUntilDue = differenceInDays(today, parseDateOnly(review.dueDateValue));
+  return daysUntilDue >= 0 && daysUntilDue <= 7;
+}
+
+function isOverdueReview(review: Review, today: Date) {
+  if (!isActionableReview(review)) {
+    return false;
+  }
+
+  return differenceInDays(today, parseDateOnly(review.dueDateValue)) < 0;
+}
+
+type WorkQueueItem = {
+  to: string;
+  icon: React.ReactNode;
+  tone: string;
+  count: number;
+  title: string;
+  detail: string;
+};
 
 function App() {
   const [personas, setPersonas] = useState<Persona[]>(demoPersonas);
@@ -110,6 +173,10 @@ function App() {
     }
   };
 
+  const approvalItems = getApprovalItems(caseItems, persona);
+  const canViewApprovals = persona.role === "APPROVER" || persona.role === "ADMIN";
+  const approvalCount = approvalItems.length;
+
   return (
     <div className="app-shell">
       <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
@@ -129,7 +196,7 @@ function App() {
           <NavLink to="/dashboard"><LayoutDashboard />Overview</NavLink>
           <NavLink to="/cases"><BriefcaseBusiness />Watchlist cases</NavLink>
           <NavLink to="/reviews"><CalendarCheck />Monthly reviews</NavLink>
-          <NavLink to="/approvals"><ClipboardCheck />My approvals<span className="nav-count">2</span></NavLink>
+          {canViewApprovals && <NavLink to="/approvals"><ClipboardCheck />My approvals{approvalCount > 0 && <span className="nav-count">{approvalCount}</span>}</NavLink>}
           <small className="nav-label">MANAGE</small>
           <NavLink to="/portfolio"><CircleGauge />Portfolio insights</NavLink>
           {persona.role === "ADMIN" && (
@@ -154,7 +221,7 @@ function App() {
           <div className="global-search">
             <Search size={18} />
             <input aria-label="Search" placeholder="Search borrower, case ID, or owner..." />
-            <kbd>⌘ K</kbd>
+            <kbd>Ctrl K</kbd>
           </div>
           <div className="top-actions">
             <button className="icon-button notification"><Bell size={20} /><i /></button>
@@ -163,7 +230,7 @@ function App() {
                 <span className="avatar">{persona.initials}</span>
                 <span className="persona-copy">
                   <strong>{persona.name}</strong>
-                  <small>{persona.role.replace("_", " ")} · {persona.division ?? "Global"}</small>
+                  <small>{persona.role.replace("_", " ")} / {persona.division ?? "Global"}</small>
                 </span>
                 <ChevronDown size={16} />
               </button>
@@ -182,7 +249,7 @@ function App() {
                       }}
                     >
                       <span className="avatar small">{item.initials}</span>
-                      <span><strong>{item.name}</strong><small>{item.division ?? "ALL"} · {item.role.replace("_", " ")}</small></span>
+                      <span><strong>{item.name}</strong><small>{item.division ?? "ALL"} / {item.role.replace("_", " ")}</small></span>
                       {item.id === persona.id && <CheckCircle2 size={16} />}
                     </button>
                   ))}
@@ -197,11 +264,11 @@ function App() {
           {loading && <div className="loading-bar" />}
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<Dashboard persona={persona} caseItems={caseItems} reviewItems={reviewItems} />} />
+            <Route path="/dashboard" element={<Dashboard persona={persona} caseItems={caseItems} reviewItems={reviewItems} approvalCount={approvalCount} canViewApprovals={canViewApprovals} />} />
             <Route path="/cases" element={<CasesPage persona={persona} caseItems={caseItems} createCase={(input) => mutate(() => api.createCase(persona.id, input), "Draft case created")} />} />
             <Route path="/cases/:caseId" element={<CaseDetail persona={persona} caseItems={caseItems} transition={(id, action, note) => mutate(() => api.transitionCase(persona.id, id, action, note), "Case decision recorded")} notify={notify} />} />
             <Route path="/reviews" element={<ReviewsPage persona={persona} reviewItems={reviewItems} transition={(id, action) => mutate(() => api.transitionReview(persona.id, id, action, "Updated in MYCWLNext"), "Review updated")} />} />
-            <Route path="/approvals" element={<ApprovalsPage persona={persona} caseItems={caseItems} transition={(id, action) => mutate(() => api.transitionCase(persona.id, id, action, "Decision recorded in MYCWLNext"), "Decision recorded")} />} />
+            <Route path="/approvals" element={canViewApprovals ? <ApprovalsPage persona={persona} caseItems={approvalItems} transition={(id, action) => mutate(() => api.transitionCase(persona.id, id, action, "Decision recorded in MYCWLNext"), "Decision recorded")} /> : <Navigate to="/dashboard" replace />} />
             <Route path="/portfolio" element={<PortfolioPage />} />
             <Route path="/admin" element={persona.role === "ADMIN" ? <AdminPage personas={personas} /> : <Navigate to="/dashboard" />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
@@ -231,13 +298,58 @@ function PageHeading({ eyebrow, title, description, action }: {
   );
 }
 
-function Dashboard({ persona, caseItems, reviewItems }: { persona: Persona; caseItems: WatchCase[]; reviewItems: Review[] }) {
+function Dashboard({ persona, caseItems, reviewItems, approvalCount, canViewApprovals }: { persona: Persona; caseItems: WatchCase[]; reviewItems: Review[]; approvalCount: number; canViewApprovals: boolean }) {
   const totalExposure = caseItems.reduce((sum, item) => sum + item.exposure, 0);
-  const pending = caseItems.filter((item) => item.status.includes("PENDING")).length;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const dueSoonReviews = reviewItems.filter((review) => isDueSoonReview(review, today));
+  const overdueReviews = reviewItems.filter((review) => isOverdueReview(review, today));
+  const returnedCases = caseItems.filter((item) => item.status === "RETURNED");
+  const workQueueItems: WorkQueueItem[] = [];
+
+  if (canViewApprovals) {
+    workQueueItems.push({
+      to: "/approvals",
+      icon: <ClipboardCheck />,
+      tone: "violet",
+      count: approvalCount,
+      title: "Review submissions",
+      detail: approvalCount > 0 ? "Awaiting approval" : "No pending decisions",
+    });
+  }
+
+  workQueueItems.push(
+    {
+      to: "/reviews?bucket=due-soon",
+      icon: <CalendarCheck />,
+      tone: "blue",
+      count: dueSoonReviews.length,
+      title: "Monthly reviews",
+      detail: dueSoonReviews.length > 0 ? "Due in next 7 days" : "No reviews due in next 7 days",
+    },
+    {
+      to: "/reviews?bucket=overdue",
+      icon: <AlertTriangle />,
+      tone: "amber",
+      count: overdueReviews.length,
+      title: "Overdue action",
+      detail: overdueReviews.length > 0 ? "Requires an update" : "Nothing overdue",
+    },
+    {
+      to: "/cases?status=RETURNED",
+      icon: <FilePlus2 />,
+      tone: "teal",
+      count: returnedCases.length,
+      title: "Returned case",
+      detail: returnedCases.length > 0 ? "Changes requested" : "No returned cases",
+    },
+  );
+
   return (
     <>
       <PageHeading
-        eyebrow="SATURDAY, 13 JUNE"
+        eyebrow={formatDashboardDate(new Date())}
         title={`Good evening, ${persona.name.split(" ")[0]}`}
         description={`Here is what needs attention across ${persona.division ?? "the enterprise"} today.`}
         action={<Link className="primary-button" to="/cases?create=1"><FilePlus2 size={18} />New case</Link>}
@@ -259,14 +371,14 @@ function Dashboard({ persona, caseItems, reviewItems }: { persona: Persona; case
         <article className="metric-card">
           <div className="metric-icon blue"><CalendarCheck /></div>
           <span>Reviews due</span>
-          <strong>{reviewItems.filter((review) => ["DUE", "DRAFT", "RETURNED"].includes(review.status)).length}</strong>
-          <small><em>1 overdue</em> this cycle</small>
+          <strong>{reviewItems.filter((review) => isActionableReview(review)).length}</strong>
+          <small><em>{overdueReviews.length}</em> overdue this cycle</small>
         </article>
         <article className="metric-card">
           <div className="metric-icon violet"><ClipboardCheck /></div>
           <span>Awaiting decisions</span>
-          <strong>{pending || 2}</strong>
-          <small>Oldest waiting 2 days</small>
+          <strong>{approvalCount}</strong>
+          <small>{canViewApprovals ? "Pending items in your approval queue" : "Available only to approvers and admin"}</small>
         </article>
       </section>
 
@@ -274,7 +386,7 @@ function Dashboard({ persona, caseItems, reviewItems }: { persona: Persona; case
         <article className="panel span-two">
           <div className="panel-head">
             <div><h2>Priority cases</h2><p>Cases ranked by urgency and review date</p></div>
-            <Link to="/cases">View all <span>→</span></Link>
+            <Link to="/cases">View all <span aria-hidden="true">-&gt;</span></Link>
           </div>
           <div className="case-list">
             {caseItems.slice(0, 4).map((item) => <CaseRow key={item.id} item={item} />)}
@@ -284,10 +396,7 @@ function Dashboard({ persona, caseItems, reviewItems }: { persona: Persona; case
         <article className="panel">
           <div className="panel-head"><div><h2>Work queue</h2><p>Your next actions</p></div></div>
           <div className="queue-list">
-            <QueueItem icon={<ClipboardCheck />} tone="violet" count="2" title="Review submissions" detail="Awaiting approval" />
-            <QueueItem icon={<CalendarCheck />} tone="blue" count="3" title="Monthly reviews" detail="Due in next 7 days" />
-            <QueueItem icon={<AlertTriangle />} tone="amber" count="1" title="Overdue action" detail="Requires an update" />
-            <QueueItem icon={<FilePlus2 />} tone="teal" count="1" title="Returned case" detail="Changes requested" />
+            {workQueueItems.map((item) => <QueueItem key={item.title} {...item} />)}
           </div>
         </article>
       </section>
@@ -324,19 +433,19 @@ function CaseRow({ item }: { item: WatchCase }) {
       <div className={`division-badge division-${item.division.toLowerCase()}`}>{item.division.slice(0, 2)}</div>
       <div className="case-main">
         <strong>{item.borrower}</strong>
-        <span>{item.reference} · {item.sector}</span>
+        <span>{item.reference} / {item.sector}</span>
       </div>
       <div className="case-value"><small>EXPOSURE</small><strong>{formatMoney(item.exposure)}</strong></div>
       <div className="case-value rating"><small>RISK RATING</small><strong>{item.riskRating.split(" - ")[0]}</strong></div>
       <StatusPill status={item.status} />
       <div className="review-date"><small>NEXT REVIEW</small><strong>{item.nextReview}</strong></div>
-      <span className="row-arrow">›</span>
+      <span className="row-arrow" aria-hidden="true">&gt;</span>
     </Link>
   );
 }
 
-function QueueItem({ icon, tone, count, title, detail }: { icon: React.ReactNode; tone: string; count: string; title: string; detail: string }) {
-  return <div className="queue-item"><div className={`queue-icon ${tone}`}>{icon}</div><div><strong>{title}</strong><span>{detail}</span></div><b>{count}</b></div>;
+function QueueItem({ icon, tone, count, title, detail, to }: { icon: React.ReactNode; tone: string; count: number; title: string; detail: string; to: string }) {
+  return <Link className="queue-item" to={to}><div className={`queue-icon ${tone}`}>{icon}</div><div><strong>{title}</strong><span>{detail}</span></div><b>{count}</b></Link>;
 }
 
 function Activity({ initials, text, time }: { initials: string; text: string; time: string }) {
@@ -344,19 +453,29 @@ function Activity({ initials, text, time }: { initials: string; text: string; ti
 }
 
 function CasesPage({ persona, caseItems, createCase }: { persona: Persona; caseItems: WatchCase[]; createCase: (input: CaseCreateInput) => Promise<void> }) {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
   const [query, setQuery] = useState("");
-  const [showCreate, setShowCreate] = useState(new URLSearchParams(location.search).has("create"));
-  const filtered = caseItems.filter((item) => `${item.borrower} ${item.reference}`.toLowerCase().includes(query.toLowerCase()));
+  const [showCreate, setShowCreate] = useState(params.has("create"));
+  const statusFilter = params.get("status");
+  const filtered = caseItems.filter((item) => {
+    const matchesQuery = `${item.borrower} ${item.reference}`.toLowerCase().includes(query.toLowerCase());
+    const matchesStatus = !statusFilter || item.status === statusFilter;
+    return matchesQuery && matchesStatus;
+  });
+  const description = statusFilter === "RETURNED"
+    ? `${filtered.length} returned cases requiring updates`
+    : `${persona.role === "ADMIN" ? "Enterprise" : persona.division} portfolio / ${filtered.length} relationships`;
   return (
     <>
       <PageHeading
         title="Watchlist cases"
-        description={`${persona.role === "ADMIN" ? "Enterprise" : persona.division} portfolio · ${filtered.length} relationships`}
+        description={description}
         action={persona.role === "CASE_OWNER" ? <button className="primary-button" onClick={() => setShowCreate(true)}><FilePlus2 size={18} />New case</button> : undefined}
       />
       <div className="toolbar">
         <div className="table-search"><Search size={17} /><input placeholder="Search cases..." value={query} onChange={(event) => setQuery(event.target.value)} /></div>
-        <button className="filter-button">All statuses <ChevronDown size={15} /></button>
+        <button className="filter-button">{statusFilter ?? "All statuses"} <ChevronDown size={15} /></button>
         <button className="filter-button">All ratings <ChevronDown size={15} /></button>
       </div>
       <div className="table-panel">
@@ -365,7 +484,7 @@ function CasesPage({ persona, caseItems, createCase }: { persona: Persona; caseI
           <tbody>
             {filtered.map((item) => (
               <tr key={item.id}>
-                <td><Link to={`/cases/${item.id}`}><strong>{item.borrower}</strong><small>{item.reference} · {item.sector}</small></Link></td>
+                <td><Link to={`/cases/${item.id}`}><strong>{item.borrower}</strong><small>{item.reference} / {item.sector}</small></Link></td>
                 <td><span className="division-tag">{item.division}</span></td>
                 <td><strong>{formatMoney(item.exposure)}</strong></td>
                 <td><span className={`risk-number risk-${item.riskRating.charAt(0)}`}>{item.riskRating.charAt(0)}</span></td>
@@ -426,10 +545,10 @@ function CaseDetail({ persona, caseItems, transition, notify }: { persona: Perso
   const canApprove = persona.role === "APPROVER" && persona.division === item.division;
   return (
     <>
-      <button className="back-button" onClick={() => navigate(-1)}>← Back to cases</button>
+      <button className="back-button" onClick={() => navigate(-1)}>&lt;- Back to cases</button>
       <div className="detail-heading">
         <div className={`division-badge large division-${item.division.toLowerCase()}`}>{item.division.slice(0, 2)}</div>
-        <div><span>{item.reference}</span><h1>{item.borrower}</h1><p>{item.sector} · {item.division} division</p></div>
+        <div><span>{item.reference}</span><h1>{item.borrower}</h1><p>{item.sector} / {item.division} division</p></div>
         <StatusPill status={item.status} />
         <div className="detail-actions">
           {canApprove && item.status === "PENDING_APPROVAL" && <><button className="secondary-button" onClick={() => void transition(item.id, "return", "Additional evidence required")}>Return</button><button className="primary-button" onClick={() => void transition(item.id, "approve", "Approved by division approver")}>Approve</button></>}
@@ -451,13 +570,13 @@ function CaseDetail({ persona, caseItems, transition, notify }: { persona: Perso
             <div className="narrative"><h3>Watchlist rationale</h3><p>{item.summary}</p><div className="trigger-list">{item.triggers.map((trigger) => <span key={trigger}><AlertTriangle size={14} />{trigger}</span>)}</div></div>
           </article>
           <article className="panel">
-            <div className="panel-head"><div><h2>Remediation plan</h2><p>{item.openActions} open actions · {item.overdueActions} overdue</p></div><button className="secondary-button small-button">Add action</button></div>
+            <div className="panel-head"><div><h2>Remediation plan</h2><p>{item.openActions} open actions / {item.overdueActions} overdue</p></div><button className="secondary-button small-button">Add action</button></div>
             <div className="progress-head"><span>Overall progress</span><strong>{item.actionProgress}%</strong></div>
             <div className="progress"><i style={{ width: `${item.actionProgress}%` }} /></div>
             <div className="action-list">
               <div><CheckCircle2 className="done" /><span><strong>Receive updated 13-week cash flow</strong><small>Completed Jun 8 by {item.owner}</small></span></div>
-              <div><span className="open-check" /><span><strong>Validate covenant cure plan</strong><small>Due Jun 16 · Credit Risk</small></span><StatusPill status="ACTIVE" /></div>
-              <div><AlertTriangle className="overdue" /><span><strong>Obtain sponsor support confirmation</strong><small>Due Jun 10 · 3 days overdue</small></span><StatusPill status="RETURNED" /></div>
+              <div><span className="open-check" /><span><strong>Validate covenant cure plan</strong><small>Due Jun 16 / Credit Risk</small></span><StatusPill status="ACTIVE" /></div>
+              <div><AlertTriangle className="overdue" /><span><strong>Obtain sponsor support confirmation</strong><small>Due Jun 10 / 3 days overdue</small></span><StatusPill status="RETURNED" /></div>
             </div>
           </article>
         </section>
@@ -474,7 +593,7 @@ function CaseDetail({ persona, caseItems, transition, notify }: { persona: Perso
             <div className="panel-head"><div><h2>Timeline</h2></div><button className="text-button">Full history</button></div>
             <div className="timeline">
               <div><i /><span><strong>{item.lastActivity}</strong><small>{item.owner}</small></span></div>
-              <div><i /><span><strong>May review approved</strong><small>{item.approver} · May 21</small></span></div>
+              <div><i /><span><strong>May review approved</strong><small>{item.approver} / May 21</small></span></div>
               <div><i /><span><strong>Added to watchlist</strong><small>Mar 11, 2026</small></span></div>
             </div>
           </article>
@@ -485,15 +604,35 @@ function CaseDetail({ persona, caseItems, transition, notify }: { persona: Perso
 }
 
 function ReviewsPage({ persona, reviewItems, transition }: { persona: Persona; reviewItems: Review[]; transition: (id: number, action: string) => Promise<void> }) {
-  const visible = reviewItems;
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const bucket = params.get("bucket");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const visible = reviewItems.filter((review) => {
+    if (bucket === "due-soon") {
+      return isDueSoonReview(review, today);
+    }
+
+    if (bucket === "overdue") {
+      return isOverdueReview(review, today);
+    }
+
+    return true;
+  });
+  const description = bucket === "due-soon"
+    ? `${visible.length} monthly reviews due in the next 7 days.`
+    : bucket === "overdue"
+      ? `${visible.length} overdue monthly reviews requiring attention.`
+      : "Monitor periodic assessments, recommendations, and attestations.";
   return (
     <>
-      <PageHeading title="Monthly reviews" description="Monitor periodic assessments, recommendations, and attestations." />
+      <PageHeading title="Monthly reviews" description={description} />
       <div className="review-cards">
         {visible.map((review) => (
           <Link to={`/cases/${review.caseId}`} className="review-card" key={review.id}>
             <div><CalendarCheck /><StatusPill status={review.status} /></div>
-            <span>{review.period} · Due {review.dueDate}</span>
+            <span>{review.period} / Due {review.dueDate}</span>
             <h3>{review.borrower}</h3>
             <p>{review.recommendation}</p>
             <footer>
@@ -501,7 +640,7 @@ function ReviewsPage({ persona, reviewItems, transition }: { persona: Persona; r
               <strong>{review.owner}</strong>
               {persona.name === review.owner && ["DUE", "DRAFT", "RETURNED"].includes(review.status) && <button className="text-button" onClick={(event) => { event.preventDefault(); void transition(review.id, review.status === "DUE" ? "start" : "submit"); }}>{review.status === "DUE" ? "Start" : "Submit"}</button>}
               {persona.role === "APPROVER" && persona.division === review.division && review.status === "PENDING_APPROVAL" && <span className="review-decisions"><button className="text-button danger" onClick={(event) => { event.preventDefault(); void transition(review.id, "return"); }}>Return</button><button className="text-button" onClick={(event) => { event.preventDefault(); void transition(review.id, "approve"); }}>Approve</button></span>}
-              <span>Open case →</span>
+              <span>Open case -&gt;</span>
             </footer>
           </Link>
         ))}
@@ -511,17 +650,17 @@ function ReviewsPage({ persona, reviewItems, transition }: { persona: Persona; r
 }
 
 function ApprovalsPage({ persona, caseItems, transition }: { persona: Persona; caseItems: WatchCase[]; transition: (id: number, action: string) => Promise<void> }) {
-  const items = caseItems.filter((item) => item.status === "PENDING_APPROVAL" || item.status === "REMOVAL_PENDING");
+  const isReadOnly = persona.role === "ADMIN";
   return (
     <>
-      <PageHeading title="Approval queue" description={persona.role === "CASE_OWNER" ? "Switch to an approver persona to make decisions." : "Independent decisions requiring your attention."} />
+      <PageHeading title="Approval queue" description={isReadOnly ? "Enterprise-wide pending decisions in read-only mode." : "Independent decisions requiring your attention."} />
       <div className="approval-stack">
-        {items.map((item) => (
+        {caseItems.map((item) => (
           <article className="panel approval-card" key={item.id}>
             <div className={`division-badge division-${item.division.toLowerCase()}`}>{item.division.slice(0, 2)}</div>
-            <div><span>{item.reference} · {item.division}</span><h3>{item.borrower}</h3><p>{item.summary}</p></div>
+            <div><span>{item.reference} / {item.division}</span><h3>{item.borrower}</h3><p>{item.summary}</p></div>
             <div className="approval-meta"><small>DECISION</small><strong>{item.status === "REMOVAL_PENDING" ? "Watchlist removal" : "Monthly review"}</strong><StatusPill status={item.status} /></div>
-            <div className="approval-buttons"><button className="secondary-button" disabled={persona.role !== "APPROVER"} onClick={() => void transition(item.id, item.status === "REMOVAL_PENDING" ? "decline_removal" : "return")}>{item.status === "REMOVAL_PENDING" ? "Decline" : "Return"}</button><button className="primary-button" disabled={persona.role !== "APPROVER"} onClick={() => void transition(item.id, item.status === "REMOVAL_PENDING" ? "approve_removal" : "approve")}>Approve</button></div>
+            <div className="approval-buttons"><button className="secondary-button" disabled={isReadOnly} onClick={() => void transition(item.id, item.status === "REMOVAL_PENDING" ? "decline_removal" : "return")}>{item.status === "REMOVAL_PENDING" ? "Decline" : "Return"}</button><button className="primary-button" disabled={isReadOnly} onClick={() => void transition(item.id, item.status === "REMOVAL_PENDING" ? "approve_removal" : "approve")}>Approve</button></div>
           </article>
         ))}
       </div>
@@ -546,7 +685,7 @@ function AdminPage({ personas }: { personas: Persona[] }) {
     <>
       <PageHeading title="Administration" description="Manage personas, divisions, workflow settings, and reference data." action={<button className="primary-button"><Settings size={18} />Workflow settings</button>} />
       <div className="admin-grid">
-        {personas.map((persona) => <article className="panel admin-person" key={persona.id}><span className="avatar">{persona.initials}</span><div><h3>{persona.name}</h3><p>{persona.division ?? "Enterprise"} · {persona.role.replace("_", " ")}</p></div><span className="active-user">Active</span></article>)}
+        {personas.map((persona) => <article className="panel admin-person" key={persona.id}><span className="avatar">{persona.initials}</span><div><h3>{persona.name}</h3><p>{persona.division ?? "Enterprise"} / {persona.role.replace("_", " ")}</p></div><span className="active-user">Active</span></article>)}
       </div>
     </>
   );
