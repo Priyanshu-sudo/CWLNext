@@ -16,11 +16,10 @@ specification work, and extension.
 
 - React 19
 - TypeScript
-- Vite
+- Next.js 16
 - Tailwind CSS 4
-- React Router
 - Lucide React icons
-- Tailwind-backed custom design system and responsive animations
+- Tailwind-backed Fintech Insight dark design system and responsive animations
 
 Frontend source lives in `frontend/src`.
 
@@ -273,7 +272,7 @@ CORS_ORIGINS=http://localhost:5173
 Optional `frontend/.env`:
 
 ```dotenv
-VITE_API_URL=http://localhost:8001/api
+NEXT_PUBLIC_API_URL=http://localhost:8001/api
 ```
 
 ## Migrations
@@ -328,9 +327,34 @@ cd frontend
 npm run dev
 ```
 
+The frontend and backend development servers run as foreground processes.
+Pressing `Ctrl+C` in each server's terminal stops that server. The project does
+not include VS Code auto-start tasks or launch configurations. Next.js dev is
+bound to `127.0.0.1:5173`.
+
+Frontend verification:
+
+```text
+npm run build
+```
+
+The build command now runs the Next.js production build. It performs optimized
+compilation, TypeScript validation, page data collection, static page
+generation, and build trace creation. Output is written to `frontend/.next`.
+
+Frontend production run:
+
+```text
+cd frontend
+npm run start
+```
+
+This serves the production build on `http://127.0.0.1:4173`.
+
 ## Important Current Notes
 
-- The frontend is now explicitly configured to use backend port `8001`.
+- The frontend is now a Next.js app and is explicitly configured to use backend
+  port `8001`.
 - The stale backend previously running on `8000` was removed during cleanup.
 - `frontend/.env` exists and points to `http://localhost:8001/api`.
 - PostgreSQL is the intended persistent database for the running app.

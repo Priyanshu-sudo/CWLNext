@@ -1,4 +1,8 @@
+"use client";
+
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   Bell,
@@ -18,16 +22,6 @@ import {
   Users,
   X,
 } from "lucide-react";
-import {
-  Link,
-  NavLink,
-  Navigate,
-  Route,
-  Routes,
-  useLocation,
-  useNavigate,
-  useParams,
-} from "react-router-dom";
 import { api } from "./api";
 import { formatMoney, personas as demoPersonas } from "./data";
 import type { CaseCreateInput, CaseStatus, Persona, Review, WatchCase } from "./types";
@@ -40,6 +34,36 @@ const statusLabel: Record<CaseStatus, string> = {
   REMOVAL_PENDING: "Removal pending",
   CLOSED: "Closed",
 };
+
+type SearchParams = Record<string, string | string[] | undefined>;
+export type AppView =
+  | { kind: "redirect"; to: string }
+  | { kind: "dashboard" }
+  | { kind: "cases" }
+  | { kind: "case-detail"; caseId: number }
+  | { kind: "reviews" }
+  | { kind: "approvals" }
+  | { kind: "portfolio" }
+  | { kind: "admin" };
+
+type WorkQueueItem = {
+  to: string;
+  icon: React.ReactNode;
+  tone: string;
+  count: number;
+  title: string;
+  detail: string;
+};
+
+function getSingleValue(
+  value: string | string[] | undefined,
+): string | undefined {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+
+  return value;
+}
 
 function StatusPill({ status }: { status: string }) {
   return (
@@ -103,16 +127,36 @@ function isOverdueReview(review: Review, today: Date) {
   return differenceInDays(today, parseDateOnly(review.dueDateValue)) < 0;
 }
 
-type WorkQueueItem = {
-  to: string;
+function AppNavLink({
+  href,
+  icon,
+  label,
+  active,
+  count,
+}: {
+  href: string;
   icon: React.ReactNode;
-  tone: string;
-  count: number;
-  title: string;
-  detail: string;
-};
+  label: string;
+  active: boolean;
+  count?: number;
+}) {
+  return (
+    <Link href={href} className={active ? "active" : undefined}>
+      {icon}
+      {label}
+      {typeof count === "number" && count > 0 && <span className="nav-count">{count}</span>}
+    </Link>
+  );
+}
 
-function App() {
+export default function App({
+  view,
+  searchParams,
+}: {
+  view: AppView;
+  searchParams: SearchParams;
+}) {
+  const router = useRouter();
   const [personas, setPersonas] = useState<Persona[]>(demoPersonas);
   const [persona, setPersona] = useState<Persona>(demoPersonas[0]);
   const [caseItems, setCaseItems] = useState<WatchCase[]>([]);
@@ -123,10 +167,10 @@ function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const [toast, setToast] = useState("");
 
-  const notify = (message: string) => {
+  const notify = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
-  };
+  }, []);
 
   const refresh = useCallback(async (activePersona: Persona) => {
     setLoading(true);
@@ -146,15 +190,17 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const fallbackPersona = demoPersonas[0];
+
     api.users()
       .then((users) => {
         setPersonas(users);
-        const active = users.find((user) => user.id === persona.id) ?? users[0];
+        const active = users.find((user) => user.id === fallbackPersona.id) ?? users[0];
         setPersona(active);
         return refresh(active);
       })
-      .catch(() => refresh(persona));
-  }, []);
+      .catch(() => refresh(fallbackPersona));
+  }, [refresh]);
 
   const switchPersona = (nextPersona: Persona) => {
     setPersona(nextPersona);
@@ -176,6 +222,22 @@ function App() {
   const approvalItems = getApprovalItems(caseItems, persona);
   const canViewApprovals = persona.role === "APPROVER" || persona.role === "ADMIN";
   const approvalCount = approvalItems.length;
+  const effectiveView =
+    view.kind === "approvals" && !canViewApprovals
+      ? ({ kind: "redirect", to: "/dashboard" } satisfies AppView)
+      : view.kind === "admin" && persona.role !== "ADMIN"
+        ? ({ kind: "redirect", to: "/dashboard" } satisfies AppView)
+        : view;
+
+  useEffect(() => {
+    if (effectiveView.kind === "redirect") {
+      router.replace(effectiveView.to);
+    }
+  }, [effectiveView, router]);
+
+  if (effectiveView.kind === "redirect") {
+    return null;
+  }
 
   return (
     <div className="app-shell">
@@ -193,14 +255,22 @@ function App() {
 
         <nav>
           <small className="nav-label">WORKSPACE</small>
-          <NavLink to="/dashboard"><LayoutDashboard />Overview</NavLink>
-          <NavLink to="/cases"><BriefcaseBusiness />Watchlist cases</NavLink>
-          <NavLink to="/reviews"><CalendarCheck />Monthly reviews</NavLink>
-          {canViewApprovals && <NavLink to="/approvals"><ClipboardCheck />My approvals{approvalCount > 0 && <span className="nav-count">{approvalCount}</span>}</NavLink>}
+          <AppNavLink href="/dashboard" icon={<LayoutDashboard />} label="Overview" active={effectiveView.kind === "dashboard"} />
+          <AppNavLink href="/cases" icon={<BriefcaseBusiness />} label="Watchlist cases" active={effectiveView.kind === "cases" || effectiveView.kind === "case-detail"} />
+          <AppNavLink href="/reviews" icon={<CalendarCheck />} label="Monthly reviews" active={effectiveView.kind === "reviews"} />
+          {canViewApprovals && (
+            <AppNavLink
+              href="/approvals"
+              icon={<ClipboardCheck />}
+              label="My approvals"
+              active={effectiveView.kind === "approvals"}
+              count={approvalCount}
+            />
+          )}
           <small className="nav-label">MANAGE</small>
-          <NavLink to="/portfolio"><CircleGauge />Portfolio insights</NavLink>
+          <AppNavLink href="/portfolio" icon={<CircleGauge />} label="Portfolio insights" active={effectiveView.kind === "portfolio"} />
           {persona.role === "ADMIN" && (
-            <NavLink to="/admin"><Users />Administration</NavLink>
+            <AppNavLink href="/admin" icon={<Users />} label="Administration" active={effectiveView.kind === "admin"} />
           )}
         </nav>
 
@@ -249,7 +319,10 @@ function App() {
                       }}
                     >
                       <span className="avatar small">{item.initials}</span>
-                      <span><strong>{item.name}</strong><small>{item.division ?? "ALL"} / {item.role.replace("_", " ")}</small></span>
+                      <span>
+                        <strong>{item.name}</strong>
+                        <small>{item.division ?? "ALL"} / {item.role.replace("_", " ")}</small>
+                      </span>
                       {item.id === persona.id && <CheckCircle2 size={16} />}
                     </button>
                   ))}
@@ -262,17 +335,49 @@ function App() {
         <div className="page">
           {loadError && <div className="api-banner"><AlertTriangle size={17} /><span><strong>API unavailable.</strong> {loadError}</span><button onClick={() => void refresh(persona)}>Retry</button></div>}
           {loading && <div className="loading-bar" />}
-          <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<Dashboard persona={persona} caseItems={caseItems} reviewItems={reviewItems} approvalCount={approvalCount} canViewApprovals={canViewApprovals} />} />
-            <Route path="/cases" element={<CasesPage persona={persona} caseItems={caseItems} createCase={(input) => mutate(() => api.createCase(persona.id, input), "Draft case created")} />} />
-            <Route path="/cases/:caseId" element={<CaseDetail persona={persona} caseItems={caseItems} transition={(id, action, note) => mutate(() => api.transitionCase(persona.id, id, action, note), "Case decision recorded")} notify={notify} />} />
-            <Route path="/reviews" element={<ReviewsPage persona={persona} reviewItems={reviewItems} transition={(id, action) => mutate(() => api.transitionReview(persona.id, id, action, "Updated in MYCWLNext"), "Review updated")} />} />
-            <Route path="/approvals" element={canViewApprovals ? <ApprovalsPage persona={persona} caseItems={approvalItems} transition={(id, action) => mutate(() => api.transitionCase(persona.id, id, action, "Decision recorded in MYCWLNext"), "Decision recorded")} /> : <Navigate to="/dashboard" replace />} />
-            <Route path="/portfolio" element={<PortfolioPage />} />
-            <Route path="/admin" element={persona.role === "ADMIN" ? <AdminPage personas={personas} /> : <Navigate to="/dashboard" />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
+          {effectiveView.kind === "dashboard" && (
+            <Dashboard
+              persona={persona}
+              caseItems={caseItems}
+              reviewItems={reviewItems}
+              approvalCount={approvalCount}
+              canViewApprovals={canViewApprovals}
+            />
+          )}
+          {effectiveView.kind === "cases" && (
+            <CasesPage
+              persona={persona}
+              caseItems={caseItems}
+              createCase={(input) => mutate(() => api.createCase(persona.id, input), "Draft case created")}
+              searchParams={searchParams}
+            />
+          )}
+          {effectiveView.kind === "case-detail" && (
+            <CaseDetail
+              persona={persona}
+              caseItems={caseItems}
+              caseId={effectiveView.caseId}
+              transition={(id, action, note) => mutate(() => api.transitionCase(persona.id, id, action, note), "Case decision recorded")}
+              notify={notify}
+            />
+          )}
+          {effectiveView.kind === "reviews" && (
+            <ReviewsPage
+              persona={persona}
+              reviewItems={reviewItems}
+              searchParams={searchParams}
+              transition={(id, action) => mutate(() => api.transitionReview(persona.id, id, action, "Updated in MYCWLNext"), "Review updated")}
+            />
+          )}
+          {effectiveView.kind === "approvals" && (
+            <ApprovalsPage
+              persona={persona}
+              caseItems={approvalItems}
+              transition={(id, action) => mutate(() => api.transitionCase(persona.id, id, action, "Decision recorded in MYCWLNext"), "Decision recorded")}
+            />
+          )}
+          {effectiveView.kind === "portfolio" && <PortfolioPage />}
+          {effectiveView.kind === "admin" && <AdminPage personas={personas} />}
         </div>
       </main>
       {toast && <div className="toast"><CheckCircle2 size={18} />{toast}</div>}
@@ -280,7 +385,12 @@ function App() {
   );
 }
 
-function PageHeading({ eyebrow, title, description, action }: {
+function PageHeading({
+  eyebrow,
+  title,
+  description,
+  action,
+}: {
   eyebrow?: string;
   title: string;
   description: string;
@@ -298,7 +408,19 @@ function PageHeading({ eyebrow, title, description, action }: {
   );
 }
 
-function Dashboard({ persona, caseItems, reviewItems, approvalCount, canViewApprovals }: { persona: Persona; caseItems: WatchCase[]; reviewItems: Review[]; approvalCount: number; canViewApprovals: boolean }) {
+function Dashboard({
+  persona,
+  caseItems,
+  reviewItems,
+  approvalCount,
+  canViewApprovals,
+}: {
+  persona: Persona;
+  caseItems: WatchCase[];
+  reviewItems: Review[];
+  approvalCount: number;
+  canViewApprovals: boolean;
+}) {
   const totalExposure = caseItems.reduce((sum, item) => sum + item.exposure, 0);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -352,7 +474,7 @@ function Dashboard({ persona, caseItems, reviewItems, approvalCount, canViewAppr
         eyebrow={formatDashboardDate(new Date())}
         title={`Good evening, ${persona.name.split(" ")[0]}`}
         description={`Here is what needs attention across ${persona.division ?? "the enterprise"} today.`}
-        action={<Link className="primary-button" to="/cases?create=1"><FilePlus2 size={18} />New case</Link>}
+        action={<Link className="primary-button" href="/cases?create=1"><FilePlus2 size={18} />New case</Link>}
       />
 
       <section className="metrics-grid">
@@ -386,7 +508,7 @@ function Dashboard({ persona, caseItems, reviewItems, approvalCount, canViewAppr
         <article className="panel span-two">
           <div className="panel-head">
             <div><h2>Priority cases</h2><p>Cases ranked by urgency and review date</p></div>
-            <Link to="/cases">View all <span aria-hidden="true">-&gt;</span></Link>
+            <Link href="/cases">View all <span aria-hidden="true">-&gt;</span></Link>
           </div>
           <div className="case-list">
             {caseItems.slice(0, 4).map((item) => <CaseRow key={item.id} item={item} />)}
@@ -429,7 +551,7 @@ function Dashboard({ persona, caseItems, reviewItems, approvalCount, canViewAppr
 
 function CaseRow({ item }: { item: WatchCase }) {
   return (
-    <Link className="case-row" to={`/cases/${item.id}`}>
+    <Link className="case-row" href={`/cases/${item.id}`}>
       <div className={`division-badge division-${item.division.toLowerCase()}`}>{item.division.slice(0, 2)}</div>
       <div className="case-main">
         <strong>{item.borrower}</strong>
@@ -444,28 +566,66 @@ function CaseRow({ item }: { item: WatchCase }) {
   );
 }
 
-function QueueItem({ icon, tone, count, title, detail, to }: { icon: React.ReactNode; tone: string; count: number; title: string; detail: string; to: string }) {
-  return <Link className="queue-item" to={to}><div className={`queue-icon ${tone}`}>{icon}</div><div><strong>{title}</strong><span>{detail}</span></div><b>{count}</b></Link>;
+function QueueItem({
+  icon,
+  tone,
+  count,
+  title,
+  detail,
+  to,
+}: {
+  icon: React.ReactNode;
+  tone: string;
+  count: number;
+  title: string;
+  detail: string;
+  to: string;
+}) {
+  return (
+    <Link className="queue-item" href={to}>
+      <div className={`queue-icon ${tone}`}>{icon}</div>
+      <div><strong>{title}</strong><span>{detail}</span></div>
+      <b>{count}</b>
+    </Link>
+  );
 }
 
 function Activity({ initials, text, time }: { initials: string; text: string; time: string }) {
   return <div className="activity"><span className="avatar small">{initials}</span><div><strong>{text}</strong><small>{time}</small></div></div>;
 }
 
-function CasesPage({ persona, caseItems, createCase }: { persona: Persona; caseItems: WatchCase[]; createCase: (input: CaseCreateInput) => Promise<void> }) {
-  const location = useLocation();
-  const params = new URLSearchParams(location.search);
+function CasesPage({
+  persona,
+  caseItems,
+  createCase,
+  searchParams,
+}: {
+  persona: Persona;
+  caseItems: WatchCase[];
+  createCase: (input: CaseCreateInput) => Promise<void>;
+  searchParams: SearchParams;
+}) {
   const [query, setQuery] = useState("");
-  const [showCreate, setShowCreate] = useState(params.has("create"));
-  const statusFilter = params.get("status");
+  const [showCreate, setShowCreate] = useState(Boolean(getSingleValue(searchParams.create)));
+  const statusFilter = getSingleValue(searchParams.status);
+  const searchKey = JSON.stringify(searchParams);
+
+  useEffect(() => {
+    if (getSingleValue(searchParams.create)) {
+      setShowCreate(true);
+    }
+  }, [searchKey, searchParams]);
+
   const filtered = caseItems.filter((item) => {
     const matchesQuery = `${item.borrower} ${item.reference}`.toLowerCase().includes(query.toLowerCase());
     const matchesStatus = !statusFilter || item.status === statusFilter;
     return matchesQuery && matchesStatus;
   });
+
   const description = statusFilter === "RETURNED"
     ? `${filtered.length} returned cases requiring updates`
     : `${persona.role === "ADMIN" ? "Enterprise" : persona.division} portfolio / ${filtered.length} relationships`;
+
   return (
     <>
       <PageHeading
@@ -484,7 +644,7 @@ function CasesPage({ persona, caseItems, createCase }: { persona: Persona; caseI
           <tbody>
             {filtered.map((item) => (
               <tr key={item.id}>
-                <td><Link to={`/cases/${item.id}`}><strong>{item.borrower}</strong><small>{item.reference} / {item.sector}</small></Link></td>
+                <td><Link href={`/cases/${item.id}`}><strong>{item.borrower}</strong><small>{item.reference} / {item.sector}</small></Link></td>
                 <td><span className="division-tag">{item.division}</span></td>
                 <td><strong>{formatMoney(item.exposure)}</strong></td>
                 <td><span className={`risk-number risk-${item.riskRating.charAt(0)}`}>{item.riskRating.charAt(0)}</span></td>
@@ -501,7 +661,15 @@ function CasesPage({ persona, caseItems, createCase }: { persona: Persona; caseI
   );
 }
 
-function CreateCaseModal({ persona, close, createCase }: { persona: Persona; close: () => void; createCase: (input: CaseCreateInput) => Promise<void> }) {
+function CreateCaseModal({
+  persona,
+  close,
+  createCase,
+}: {
+  persona: Persona;
+  close: () => void;
+  createCase: (input: CaseCreateInput) => Promise<void>;
+}) {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<CaseCreateInput>({
@@ -515,14 +683,17 @@ function CreateCaseModal({ persona, close, createCase }: { persona: Persona; clo
     triggers: [],
     next_review_date: "2026-07-15",
   });
+
   const update = <K extends keyof CaseCreateInput>(key: K, value: CaseCreateInput[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
+
   const submit = async () => {
     setSubmitting(true);
     await createCase(form);
     setSubmitting(false);
     close();
   };
+
   return (
     <div className="modal-backdrop">
       <div className="modal">
@@ -537,15 +708,37 @@ function CreateCaseModal({ persona, close, createCase }: { persona: Persona; clo
   );
 }
 
-function CaseDetail({ persona, caseItems, transition, notify }: { persona: Persona; caseItems: WatchCase[]; transition: (id: number, action: string, note: string) => Promise<void>; notify: (message: string) => void }) {
-  const { caseId } = useParams();
-  const navigate = useNavigate();
-  const item = caseItems.find((candidate) => candidate.id === Number(caseId));
-  if (!item) return <Navigate to="/cases" />;
+function CaseDetail({
+  persona,
+  caseItems,
+  caseId,
+  transition,
+  notify,
+}: {
+  persona: Persona;
+  caseItems: WatchCase[];
+  caseId: number;
+  transition: (id: number, action: string, note: string) => Promise<void>;
+  notify: (message: string) => void;
+}) {
+  const router = useRouter();
+  const item = caseItems.find((candidate) => candidate.id === caseId);
+
+  useEffect(() => {
+    if (!item) {
+      router.replace("/cases");
+    }
+  }, [item, router]);
+
+  if (!item) {
+    return null;
+  }
+
   const canApprove = persona.role === "APPROVER" && persona.division === item.division;
+
   return (
     <>
-      <button className="back-button" onClick={() => navigate(-1)}>&lt;- Back to cases</button>
+      <button className="back-button" onClick={() => router.back()}>&lt;- Back to cases</button>
       <div className="detail-heading">
         <div className={`division-badge large division-${item.division.toLowerCase()}`}>{item.division.slice(0, 2)}</div>
         <div><span>{item.reference}</span><h1>{item.borrower}</h1><p>{item.sector} / {item.division} division</p></div>
@@ -603,12 +796,21 @@ function CaseDetail({ persona, caseItems, transition, notify }: { persona: Perso
   );
 }
 
-function ReviewsPage({ persona, reviewItems, transition }: { persona: Persona; reviewItems: Review[]; transition: (id: number, action: string) => Promise<void> }) {
-  const location = useLocation();
-  const params = new URLSearchParams(location.search);
-  const bucket = params.get("bucket");
+function ReviewsPage({
+  persona,
+  reviewItems,
+  searchParams,
+  transition,
+}: {
+  persona: Persona;
+  reviewItems: Review[];
+  searchParams: SearchParams;
+  transition: (id: number, action: string) => Promise<void>;
+}) {
+  const bucket = getSingleValue(searchParams.bucket);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
   const visible = reviewItems.filter((review) => {
     if (bucket === "due-soon") {
       return isDueSoonReview(review, today);
@@ -620,17 +822,19 @@ function ReviewsPage({ persona, reviewItems, transition }: { persona: Persona; r
 
     return true;
   });
+
   const description = bucket === "due-soon"
     ? `${visible.length} monthly reviews due in the next 7 days.`
     : bucket === "overdue"
       ? `${visible.length} overdue monthly reviews requiring attention.`
       : "Monitor periodic assessments, recommendations, and attestations.";
+
   return (
     <>
       <PageHeading title="Monthly reviews" description={description} />
       <div className="review-cards">
         {visible.map((review) => (
-          <Link to={`/cases/${review.caseId}`} className="review-card" key={review.id}>
+          <Link href={`/cases/${review.caseId}`} className="review-card" key={review.id}>
             <div><CalendarCheck /><StatusPill status={review.status} /></div>
             <span>{review.period} / Due {review.dueDate}</span>
             <h3>{review.borrower}</h3>
@@ -649,8 +853,17 @@ function ReviewsPage({ persona, reviewItems, transition }: { persona: Persona; r
   );
 }
 
-function ApprovalsPage({ persona, caseItems, transition }: { persona: Persona; caseItems: WatchCase[]; transition: (id: number, action: string) => Promise<void> }) {
+function ApprovalsPage({
+  persona,
+  caseItems,
+  transition,
+}: {
+  persona: Persona;
+  caseItems: WatchCase[];
+  transition: (id: number, action: string) => Promise<void>;
+}) {
   const isReadOnly = persona.role === "ADMIN";
+
   return (
     <>
       <PageHeading title="Approval queue" description={isReadOnly ? "Enterprise-wide pending decisions in read-only mode." : "Independent decisions requiring your attention."} />
@@ -673,7 +886,7 @@ function PortfolioPage() {
     <>
       <PageHeading title="Portfolio insights" description="Enterprise concentration and watchlist movement." />
       <section className="content-grid">
-        <article className="panel span-two"><div className="panel-head"><div><h2>Risk migration</h2><p>Relationship count by internal rating</p></div></div><div className="migration"><div><span>5</span><i style={{height:"38%"}} /><b>4</b></div><div><span>6</span><i style={{height:"78%"}} /><b>9</b></div><div><span>7</span><i style={{height:"58%"}} /><b>6</b></div><div><span>8</span><i style={{height:"25%"}} /><b>2</b></div></div></article>
+        <article className="panel span-two"><div className="panel-head"><div><h2>Risk migration</h2><p>Relationship count by internal rating</p></div></div><div className="migration"><div><span>5</span><i style={{ height: "38%" }} /><b>4</b></div><div><span>6</span><i style={{ height: "78%" }} /><b>9</b></div><div><span>7</span><i style={{ height: "58%" }} /><b>6</b></div><div><span>8</span><i style={{ height: "25%" }} /><b>2</b></div></div></article>
         <article className="panel"><div className="panel-head"><div><h2>Top warning indicators</h2><p>Active case signals</p></div></div><div className="indicator-list"><div><span>Liquidity pressure</span><b>7</b></div><div><span>Covenant breach</span><b>5</b></div><div><span>Revenue decline</span><b>4</b></div><div><span>Management change</span><b>3</b></div></div></article>
       </section>
     </>
@@ -690,5 +903,3 @@ function AdminPage({ personas }: { personas: Persona[] }) {
     </>
   );
 }
-
-export default App;

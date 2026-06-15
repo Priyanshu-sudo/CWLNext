@@ -1,4 +1,5 @@
 node_modules/
+.next/
 dist/
 .vite/
 __pycache__/
@@ -8,6 +9,4 @@ __pycache__/
 .env
 *.db
 *.tsbuildinfo
-frontend/vite.config.js
-frontend/vite.config.d.ts
 .DS_Store

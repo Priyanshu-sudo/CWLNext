@@ -48,7 +48,7 @@ npm install
 Optional `frontend/.env`:
 
 ```dotenv
-VITE_API_URL=http://localhost:8001/api
+NEXT_PUBLIC_API_URL=http://localhost:8001/api
 ```
 
 If you create or change `frontend/.env`, restart the frontend dev server before
@@ -80,6 +80,13 @@ Frontend URL:
 
 - App: `http://localhost:5173`
 
+Both commands run as foreground processes in their own terminals. Press
+`Ctrl+C` once in the backend terminal and once in the frontend terminal to stop
+them. This project has no VS Code task, launch configuration, or startup script
+that automatically starts either server.
+
+The frontend dev server is configured to run on `127.0.0.1:5173`.
+
 ## Running tests
 
 Backend tests:
@@ -96,6 +103,23 @@ Frontend build:
 cd frontend
 npm run build
 ```
+
+This now runs ESLint first and then the Next.js production build. You should
+see the lint pass first, followed by the normal Next build phases such as
+optimized production compilation, TypeScript validation, page data collection,
+static page generation, and build traces. Build output is written to
+`frontend/.next`.
+
+To run the production frontend locally after building:
+
+```bat
+cd frontend
+npm run start
+```
+
+Production preview URL:
+
+- App: `http://localhost:4173`
 
 ## Docker
 

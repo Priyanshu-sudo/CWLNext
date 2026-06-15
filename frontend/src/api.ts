@@ -7,7 +7,7 @@ import type {
   WatchCase,
 } from "./types";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8001/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001/api";
 
 interface ApiUser {
   id: number;
